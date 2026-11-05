@@ -140,7 +140,7 @@ export default function Home() {
   return (
     <main>
       <header className="site-header">
-        <a className="wordmark" href="#top">LA<span>.</span></a>
+        <a className="wordmark" href="#top">lley-<span>tonn.</span></a>
         <nav className="desktop-nav">{nav.map(([label, href]) => <a key={href} href={href}>{label}</a>)}</nav>
         <button className="nav-cta" onClick={() => setRsvpOpen(true)}>RSVP <ArrowRight size={15} /></button>
         <button className="mobile-menu" aria-label="Toggle navigation" onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X /> : <Menu />}</button>
