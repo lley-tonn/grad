@@ -9,8 +9,6 @@ import {
 } from "lucide-react";
 import { graduation, journey } from "@/lib/config";
 
-type RSVPStatus = "attending" | "not_attending" | "maybe";
-
 function useCountdown(target: string) {
   const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
@@ -34,9 +32,8 @@ export default function Home() {
   const [guestId, setGuestId] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [rsvpOpen, setRsvpOpen] = useState(false);
-  const [status, setStatus] = useState<RSVPStatus>("attending");
-  const [phone, setPhone] = useState("");
-  const [note, setNote] = useState("");
+  const [rsvpName, setRsvpName] = useState("");
+  const [rsvpConfirmed, setRsvpConfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [terminalOpen, setTerminalOpen] = useState(false);
@@ -69,27 +66,21 @@ export default function Home() {
   }, [guest, guestId]);
 
   async function submitRSVP() {
-    if (!guest.trim() || !guestId.trim()) {
-      setFeedback("This RSVP is reserved for guests with a personalised invitation link. Please contact the host if you need assistance.");
+    if (!rsvpName.trim()) {
+      setFeedback("Please enter the name on your invitation.");
       return;
     }
     setSubmitting(true);
     setFeedback("");
     try {
-      const response = await fetch("/api/rsvp", {
+      const response = await fetch("/api/rsvp/check", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          guest_name: guest || "Guest",
-          guest_id: guestId || null,
-          status,
-          phone: phone || null,
-          note: note || null
-        })
+        body: JSON.stringify({ name: rsvpName })
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Could not submit RSVP.");
-      setFeedback("Your response has been received. Thank you.");
+      if (!response.ok) throw new Error(result.error || "Could not check the guest list.");
+      setRsvpConfirmed(true);
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : "Something went wrong.");
     } finally {
@@ -232,8 +223,8 @@ export default function Home() {
         <div className="rsvp-inner">
           <div className="section-kicker">YOUR PRESENCE MATTERS <span>— 005</span></div>
           <h2>Save you<br /><em>a place?</em></h2>
-          <p>I'd love to celebrate this moment with you. If you received a personalised invitation, please confirm your attendance below.</p>
-          {guest && guestId ? <button className="button button-primary" onClick={() => setRsvpOpen(true)}>Confirm your attendance <ArrowRight size={16} /></button> : <p className="invite-only-note">Personalised guest invitation required to RSVP.</p>}
+          <p>I'd love to celebrate this moment with you. Enter the name on your invitation to confirm your attendance.</p>
+          <button className="button button-primary" onClick={() => { setRsvpName(guest); setRsvpConfirmed(false); setFeedback(""); setRsvpOpen(true); }}>Confirm your attendance <ArrowRight size={16} /></button>
           <div className="rsvp-footnote">A little celebration. A lifetime of memories.</div>
         </div>
       </section>
@@ -247,22 +238,16 @@ export default function Home() {
         <div className="modal">
           <button className="modal-close" onClick={() => setRsvpOpen(false)} aria-label="Close"><X /></button>
           <div className="section-kicker">THE NEXT CHAPTER <span>— RSVP</span></div>
-          <h2>{guest ? `Hello, ${guest}.` : "Personal invitation required"}</h2>
-          <p className="modal-desc">{guest && guestId ? "This invitation is reserved for you. Please respond for yourself only; additional guests are not included." : "RSVP is available only through a personalised invitation link issued to a named guest."}</p>
-          {!guest || !guestId ? <p className="form-feedback">Please open the unique link sent to you by the host.</p> : null}
-          <label className="field-label">YOUR RESPONSE</label>
-          <div className="choice-row">
-            <button className={status === "attending" ? "choice active" : "choice"} onClick={() => setStatus("attending")}><Check size={15} /> I'll be there</button>
-            <button className={status === "maybe" ? "choice active" : "choice"} onClick={() => setStatus("maybe")}>Not sure yet</button>
-            <button className={status === "not_attending" ? "choice active" : "choice"} onClick={() => setStatus("not_attending")}>Can't make it</button>
-          </div>
-          <label className="field-label" htmlFor="phone">PHONE NUMBER <span>OPTIONAL</span></label>
-          <input id="phone" className="field" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+256..." />
-          <label className="field-label" htmlFor="note">A NOTE <span>OPTIONAL</span></label>
-          <textarea id="note" className="field textarea" value={note} onChange={e => setNote(e.target.value)} placeholder="Leave a message..." rows={3} />
-          <button className="button button-primary modal-submit" onClick={submitRSVP} disabled={submitting || !guest || !guestId}>{submitting ? "Sending..." : "Submit RSVP"} <ArrowRight size={16} /></button>
+          <h2>{rsvpConfirmed ? "Thank you!" : "Confirm your attendance"}</h2>
+          <p className="modal-desc">{rsvpConfirmed ? "Your name is on the guest list. We look forward to celebrating with you." : "Enter the name shown on your invitation. You can enter one name or several names separated by commas or new lines."}</p>
+          {!rsvpConfirmed && <>
+            <label className="field-label" htmlFor="rsvp-name">NAME ON YOUR INVITATION</label>
+            <input id="rsvp-name" className="field" value={rsvpName} onChange={e => setRsvpName(e.target.value)} onKeyDown={e => { if (e.key === "Enter") submitRSVP(); }} placeholder="Enter your name" autoComplete="name" />
+            <button className="button button-primary modal-submit" onClick={submitRSVP} disabled={submitting}>{submitting ? "Checking..." : "Confirm attendance"} <ArrowRight size={16} /></button>
+          </>}
           {feedback && <p className="form-feedback">{feedback}</p>}
-          <p className="privacy-note">Your response is only used for graduation planning.</p>
+          {rsvpConfirmed && <button className="button button-primary modal-submit" onClick={() => setRsvpOpen(false)}>Done <Check size={16} /></button>}
+          {!rsvpConfirmed && <p className="privacy-note">Your name is checked against the invited guest list.</p>}
         </div>
       </div>}
 
