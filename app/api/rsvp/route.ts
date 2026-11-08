@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 
 export async function POST(request: Request) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) {
     return NextResponse.json(
       { error: "RSVP storage is not connected yet. Please contact the host directly." },
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Please provide a valid RSVP." }, { status: 400 });
     }
 
-    const supabase = createClient(url, key);
+    const supabase = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } });
     const { error } = await supabase.from("graduation_rsvps").insert({
       guest_name: body.guest_name.slice(0, 120),
       guest_id: body.guest_id.slice(0, 80),

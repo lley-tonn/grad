@@ -1,18 +1,36 @@
 import { NextResponse } from "next/server";
-import { matchesInvitedGuests } from "@/lib/guest-list";
+import { createClient } from "@supabase/supabase-js";
+import { getMatchedGuests } from "@/lib/guest-list";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    if (typeof body.name !== "string" || !body.name.trim() || body.name.length > 500) {
+    if (typeof body.name !== "string" || !body.name.trim() || body.name.length > 500 || (body.message !== undefined && (typeof body.message !== "string" || body.message.length > 500))) {
       return NextResponse.json({ error: "Please enter the name on your invitation." }, { status: 400 });
     }
 
-    if (!matchesInvitedGuests(body.name)) {
-      return NextResponse.json({ error: "We couldn't find that name on the guest list. Please check the spelling or contact the host." }, { status: 404 });
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const serviceKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!url || !serviceKey) {
+      return NextResponse.json({ error: "Attendance confirmation is temporarily unavailable. Please contact the host." }, { status: 503 });
     }
 
-    return NextResponse.json({ success: true });
+    const supabase = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } });
+    const { data: guests, error: guestError } = await supabase.from("graduation_guests").select("id,full_name");
+    if (guestError) throw guestError;
+    const matchedNames = getMatchedGuests(body.name, (guests ?? []).map(guest => guest.full_name));
+    if (!matchedNames.length) {
+      return NextResponse.json({ error: "We couldn't find one clear match. Please check the spelling and enter enough of the name to identify one guest." }, { status: 404 });
+    }
+
+    const idsByName = new Map((guests ?? []).map(guest => [guest.full_name, guest.id]));
+    const confirmedAt = new Date().toISOString();
+    const { error } = await supabase.from("graduation_attendance").upsert(
+      matchedNames.map(fullName => ({ guest_id: idsByName.get(fullName), status: "attending", confirmed_at: confirmedAt, updated_at: confirmedAt, guest_message: body.message?.trim() || null })),
+      { onConflict: "guest_id" }
+    );
+    if (error) throw error;
+    return NextResponse.json({ success: true, guests: matchedNames });
   } catch {
     return NextResponse.json({ error: "We couldn't check the guest list. Please try again." }, { status: 400 });
   }

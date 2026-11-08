@@ -9,6 +9,7 @@ A premium, Apple-inspired digital graduation invitation for 12 November 2026.
 - Graduation journey timeline
 - RSVP modal with attending / maybe / unable to attend
 - Supabase-backed RSVP API route
+- Password-protected attendance dashboard at `/attendance`
 - Downloadable QR code and copyable invitation link
 - Hidden developer terminal with Easter-egg commands
 - WhatsApp-ready personalised links
@@ -30,22 +31,26 @@ Open http://localhost:3000.
 ## 3. Confirmed event details
 The project is configured for Thursday, 12 November 2026 at 6:00 PM EAT. Guest arrival is 5:45 PM at Fairway Hotel, Kafu Road, Kampala. Dress code: Smart casual. RSVP deadline: 11 November 2026. Both WhatsApp contacts are displayed in the footer. Update `lib/config.ts` if any detail changes. The uploaded graduation portrait is stored at `public/graduation-portrait.jpg`.
 
-## 4. Guest-only RSVP behaviour
-The RSVP form requires both a guest name and invitation ID in the URL, for example `?guest=Jane%20Doe&id=GUEST-001`. The form does not ask for or allow plus-one counts. This is a front-end gate, not a complete invitation whitelist: before public launch, add a server-side guest allowlist and validate each invitation ID against it so guessed or altered URLs cannot submit an RSVP. Do not treat a guest name and arbitrary ID as secure authentication.
+## 4. Guest RSVP behaviour
+Guests confirm by entering a name from the Supabase `graduation_guests` roster. The server matches the name, then upserts one `graduation_attendance` row per matched guest. Partial names are accepted only when they uniquely identify a guest; ambiguous names need more identifying words. Multiple names can be separated by commas or new lines.
 
 ## 5. Connect RSVP storage
 1. Create a Supabase project.
-2. Open the SQL Editor and run `supabase/schema.sql`.
+2. For a new project, open the SQL Editor and run `supabase/schema.sql`. For an existing project, run `supabase/migrations/202611080001_guest_roster_and_attendance.sql` followed by `supabase/migrations/202611080002_guest_messages_and_host_controls.sql`. The migrations seed the 11 invited names, preserve matching prior RSVP responses, and add private guest messages and host-managed response states.
 3. Copy the project URL and anon key into `.env.local`:
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=YOUR_SUPABASE_PUBLISHABLE_KEY
+SUPABASE_SECRET_KEY=YOUR_SUPABASE_SECRET_KEY
+ATTENDANCE_ADMIN_PASSWORD=CHOOSE_A_PRIVATE_PASSWORD
+ATTENDANCE_SESSION_SECRET=CHOOSE_A_LONG_RANDOM_SECRET
 NEXT_PUBLIC_SITE_URL=http://localhost:3000
 ```
-4. Restart the dev server.
-5. Test an RSVP. The public policy permits inserts only; guests cannot read the RSVP list.
+4. Restart the dev server. Keep the Supabase secret key and attendance secrets private; never add a `NEXT_PUBLIC_` prefix to them.
+5. Open `/attendance` and sign in with `ATTENDANCE_ADMIN_PASSWORD`. The session expires after eight hours. The dashboard reads the guest roster and attendance tables using the service-role key; guests cannot access this page's data.
+6. Guest confirmations are remembered on the guest's device. On `/attendance`, you can correct guest names, update their response, and read or edit optional messages.
 
-For production, consider adding rate limiting / CAPTCHA to the RSVP endpoint and an admin-only dashboard or secure Supabase view for the host.
+The guest and attendance tables have row-level security enabled and no public read/write policies. Server routes access them with `SUPABASE_SECRET_KEY`; keep that key private. The legacy `graduation_rsvps` table remains for older RSVP submissions.
 
 ## 5. Personalised WhatsApp links
 Use this URL format:

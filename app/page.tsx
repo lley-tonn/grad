@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { motion, useReducedMotion } from "framer-motion";
+import Image from "next/image";
 import QRCode from "qrcode";
 import {
-  ArrowDown, ArrowRight, CalendarDays, Check, ChevronRight, Code2,
+  ArrowDown, ArrowRight, CalendarDays, Check, Code2,
   Copy, ExternalLink, MapPin, Menu, Terminal, X
 } from "lucide-react";
 import { graduation, journey } from "@/lib/config";
@@ -28,12 +29,16 @@ function useCountdown(target: string) {
 
 export default function Home() {
   const countdown = useCountdown(graduation.eventDateISO);
+  const reduceMotion = useReducedMotion() ?? false;
   const [guest, setGuest] = useState("");
   const [guestId, setGuestId] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [rsvpOpen, setRsvpOpen] = useState(false);
   const [rsvpName, setRsvpName] = useState("");
+  const [rsvpMessage, setRsvpMessage] = useState("");
   const [rsvpConfirmed, setRsvpConfirmed] = useState(false);
+  const [returningGuests, setReturningGuests] = useState<string[]>([]);
+  const rsvpDialogRef = useRef<HTMLDivElement>(null);
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [terminalOpen, setTerminalOpen] = useState(false);
@@ -54,7 +59,32 @@ export default function Home() {
     cleanUrl.searchParams.delete("guest");
     cleanUrl.searchParams.delete("id");
     setQrData(window.location.origin + cleanUrl.pathname);
+    try {
+      const savedGuests = JSON.parse(localStorage.getItem("lleyton-graduation-confirmed") || "[]");
+      if (Array.isArray(savedGuests) && savedGuests.every(name => typeof name === "string")) setReturningGuests(savedGuests);
+    } catch { /* Local storage can be unavailable in private browsing. */ }
   }, []);
+
+  useEffect(() => {
+    if (!rsvpOpen) return;
+    const dialog = rsvpDialogRef.current;
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusFrame = window.requestAnimationFrame(() => dialog?.querySelector<HTMLElement>("input, textarea, button")?.focus());
+    function handleDialogKeys(event: KeyboardEvent) {
+      if (event.key === "Escape") setRsvpOpen(false);
+      if (event.key !== "Tab" || !dialog) return;
+      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), textarea:not([disabled])')).filter(element => element.offsetParent !== null);
+      if (!focusable.length) return;
+      if (event.shiftKey && document.activeElement === focusable[0]) { event.preventDefault(); focusable.at(-1)?.focus(); }
+      else if (!event.shiftKey && document.activeElement === focusable.at(-1)) { event.preventDefault(); focusable[0].focus(); }
+    }
+    document.addEventListener("keydown", handleDialogKeys);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener("keydown", handleDialogKeys);
+      previouslyFocused?.focus();
+    };
+  }, [rsvpOpen]);
 
   const greeting = guest.trim() ? `A personal invitation for ${guest.trim()}` : "You're invited";
   const shareUrl = useMemo(() => {
@@ -76,17 +106,35 @@ export default function Home() {
       const response = await fetch("/api/rsvp/check", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: rsvpName })
+        body: JSON.stringify({ name: rsvpName, message: rsvpMessage })
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Could not check the guest list.");
+      setReturningGuests(result.guests);
+      try { localStorage.setItem("lleyton-graduation-confirmed", JSON.stringify(result.guests)); } catch { /* The response is still confirmed on the server. */ }
       setRsvpConfirmed(true);
+      window.requestAnimationFrame(() => document.getElementById("rsvp-done")?.focus());
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : "Something went wrong.");
     } finally {
       setSubmitting(false);
     }
   }
+
+  function openRSVP() {
+    setRsvpName(guest || returningGuests.join(", "));
+    setRsvpMessage("");
+    setRsvpConfirmed(returningGuests.length > 0);
+    setFeedback("");
+    setRsvpOpen(true);
+  }
+
+  useEffect(() => {
+    if (!terminalOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setTerminalOpen(false); };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [terminalOpen]);
 
   function runCommand(event: React.FormEvent) {
     event.preventDefault();
@@ -127,30 +175,41 @@ export default function Home() {
     ["The details", "#details"],
     ["RSVP", "#rsvp"]
   ];
+  const eventStart = new Date(graduation.eventDateISO);
+  const eventEnd = new Date(eventStart.getTime() + 3 * 60 * 60 * 1000);
+  const utcStamp = (date: Date) => date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  const calendarText = [
+    "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Lleyton Adrian//Graduation Celebration//EN", "CALSCALE:GREGORIAN", "BEGIN:VEVENT",
+    `UID:lleyton-graduation-${utcStamp(eventStart)}@lleytonadrian`, `DTSTAMP:${utcStamp(new Date())}`, `DTSTART:${utcStamp(eventStart)}`, `DTEND:${utcStamp(eventEnd)}`,
+    "SUMMARY:Lleyton Adrian's Graduation Celebration", `LOCATION:${graduation.venue.replace(/\\/g, "\\\\").replace(/,/g, "\\,").replace(/;/g, "\\;")}`,
+    "DESCRIPTION:Celebrate Lleyton Adrian's Bachelor of Science in Computer Science graduation.", "END:VEVENT", "END:VCALENDAR"
+  ].join("\r\n");
+  const calendarHref = `data:text/calendar;charset=utf-8,${encodeURIComponent(calendarText)}`;
+  const directionsHref = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(graduation.venue)}`;
 
   return (
     <main>
       <header className="site-header">
         <a className="wordmark" href="#top">lley-<span>tonn.</span></a>
         <nav className="desktop-nav">{nav.map(([label, href]) => <a key={href} href={href}>{label}</a>)}</nav>
-        <button className="nav-cta" onClick={() => setRsvpOpen(true)}>RSVP <ArrowRight size={15} /></button>
-        <button className="mobile-menu" aria-label="Toggle navigation" onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X /> : <Menu />}</button>
+        <button className="nav-cta" onClick={openRSVP}>RSVP <ArrowRight size={15} /></button>
+        <button className="mobile-menu" aria-label="Toggle navigation" aria-expanded={menuOpen} aria-controls="mobile-navigation" onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X /> : <Menu />}</button>
       </header>
-      {menuOpen && <div className="mobile-nav">{nav.map(([label, href]) => <a key={href} href={href} onClick={() => setMenuOpen(false)}>{label}</a>)}</div>}
+      {menuOpen && <nav className="mobile-nav" id="mobile-navigation" aria-label="Mobile navigation">{nav.map(([label, href]) => <a key={href} href={href} onClick={() => setMenuOpen(false)}>{label}</a>)}</nav>}
 
       <section className="hero" id="top">
         <div className="hero-glow" />
         <div className="hero-content">
-          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .8 }} className="eyebrow"><span className="eyebrow-dot" /> A MILESTONE WORTH SHARING</motion.div>
-          <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: .2 }} className="guest-greeting">{greeting}</motion.p>
-          <motion.h1 initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .25, duration: .9 }}>
+          <motion.div initial={reduceMotion ? false : { opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reduceMotion ? 0 : .8 }} className="eyebrow"><span className="eyebrow-dot" /> A MILESTONE WORTH SHARING</motion.div>
+          <motion.p initial={reduceMotion ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: reduceMotion ? 0 : .2 }} className="guest-greeting">{greeting}</motion.p>
+          <motion.h1 initial={reduceMotion ? false : { opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: reduceMotion ? 0 : .25, duration: reduceMotion ? 0 : .9 }}>
             The next<br /><span>chapter.</span>
           </motion.h1>
-          <motion.p className="hero-subtitle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: .55 }}>
+          <motion.p className="hero-subtitle" initial={reduceMotion ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: reduceMotion ? 0 : .55 }}>
             One journey. One milestone.<br />A new beginning.
           </motion.p>
-          <motion.div className="hero-actions" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .7 }}>
-            <button className="button button-primary" onClick={() => setRsvpOpen(true)}>You're invited <ArrowRight size={16} /></button>
+          <motion.div className="hero-actions" initial={reduceMotion ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: reduceMotion ? 0 : .7 }}>
+            <button className="button button-primary" onClick={openRSVP}>You&apos;re invited <ArrowRight size={16} /></button>
             <a className="text-link" href="#story">Discover the story <ArrowDown size={15} /></a>
           </motion.div>
           <div className="hero-meta"><span>12 NOVEMBER 2026</span><i /> <span>FAIRWAY HOTEL, KAFU ROAD, KAMPALA-UGANDA</span></div>
@@ -161,7 +220,7 @@ export default function Home() {
       <section className="intro section-pad">
         <div className="section-kicker">A NOTE FROM THE GRADUATE <span>— 001</span></div>
         <p className="intro-copy">Some milestones are too meaningful to celebrate alone. After years of learning, building, figuring things out and growing, <em>this is one of those moments.</em></p>
-        <p className="intro-small">I'd love for you to be part of it.</p>
+        <p className="intro-small">I&apos;d love for you to be part of it.</p>
       </section>
 
       <section className="story section-pad" id="story">
@@ -171,7 +230,7 @@ export default function Home() {
         </div>
         <div className="timeline">
           {journey.map((item, index) => (
-            <motion.article className="timeline-item" key={item.year} initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, amount: .3 }} transition={{ delay: index * .08 }}>
+            <motion.article className="timeline-item" key={item.year} initial={reduceMotion ? false : { opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, amount: .3 }} transition={{ delay: reduceMotion ? 0 : index * .08, duration: reduceMotion ? 0 : .3 }}>
               <div className="timeline-index">0{index + 1}</div>
               <div className="timeline-content"><span>{item.year}</span><h3>{item.title}</h3><p>{item.text}</p></div>
               <div className="timeline-mark">{index === 2 ? <Code2 /> : <span />}</div>
@@ -190,7 +249,7 @@ export default function Home() {
           <div className="degree-rule" />
           <span className="degree-date">CLASS OF 2026</span>
         </div>
-        <div className="degree-portrait-wrap"><img src={graduation.portrait} alt="Agenorwoth Lleyton Adrian in his graduation gown" className="degree-portrait" /></div>
+        <div className="degree-portrait-wrap"><Image src={graduation.portrait} alt="Agenorwoth Lleyton Adrian in his graduation gown" className="degree-portrait" width={800} height={800} sizes="(max-width: 760px) 72vw, 34vw" priority /></div>
         <div className="degree-side-note">A NEW CHAPTER IN PROGRESS</div>
       </section>
 
@@ -203,12 +262,16 @@ export default function Home() {
 
       <section className="details section-pad" id="details">
         <div className="section-kicker">SAVE THE DATE <span>— 004</span></div>
-        <div className="details-heading"><h2>Let's make<br />a memory.</h2><p>I'd be honoured to have you there as I celebrate this milestone.</p></div>
+        <div className="details-heading"><h2>Let&apos;s make<br />a memory.</h2><p>I&apos;d be honoured to have you there as I celebrate this milestone.</p></div>
         <div className="details-grid">
           <div className="detail-card"><CalendarDays /><span>THE DATE & TIME</span><strong>Thursday, 12 November 2026</strong><small>Guest arrival {graduation.arrivalTime} · Dinner {graduation.time}</small></div>
           <div className="detail-card"><MapPin /><span>THE VENUE</span><strong>Fairway Hotel</strong><small>Kafu Road, Kampala, Uganda</small></div>
           <div className="detail-card"><Code2 /><span>THE QUALIFICATION</span><strong>BSc Computer Science</strong><small>{graduation.university}</small></div>
           <div className="detail-card"><Check /><span>DRESS CODE & RSVP</span><strong>{graduation.dressCode}</strong><small>Kindly respond by {graduation.rsvpDeadline}</small></div>
+        </div>
+        <div className="event-actions" aria-label="Event tools">
+          <a className="event-action" href={calendarHref} download="lleyton-adrian-graduation.ics"><CalendarDays size={17} aria-hidden="true" /><span><strong>Add to calendar</strong><small>Save the date and time</small></span><ArrowRight size={15} aria-hidden="true" /></a>
+          <a className="event-action" href={directionsHref} target="_blank" rel="noreferrer"><MapPin size={17} aria-hidden="true" /><span><strong>Get directions</strong><small>Fairway Hotel, Kampala</small></span><ExternalLink size={15} aria-hidden="true" /></a>
         </div>
         <div className="countdown-wrap">
           <div><span className="section-kicker">COUNTING DOWN TO THE NEXT CHAPTER</span><h3>{countdown.complete ? "The day is here." : "The moment is getting closer."}</h3></div>
@@ -216,15 +279,16 @@ export default function Home() {
             {([["days", countdown.days], ["hours", countdown.hours], ["minutes", countdown.minutes], ["seconds", countdown.seconds]] as const).map(([label, value]) => <div className="count-unit" key={label}><strong>{String(value).padStart(2, "0")}</strong><span>{label}</span></div>)}
           </div>
         </div>
-        <p className="detail-note">Please note: invitations are strictly for the named guest. Each guest should RSVP using their own personalised invitation link.</p>
+        <p className="detail-note">Please confirm using the name shown on your invitation. We look forward to celebrating with you.</p>
       </section>
 
       <section className="rsvp-section" id="rsvp">
         <div className="rsvp-inner">
           <div className="section-kicker">YOUR PRESENCE MATTERS <span>— 005</span></div>
           <h2>Save you<br /><em>a place?</em></h2>
-          <p>I'd love to celebrate this moment with you. Enter the name on your invitation to confirm your attendance.</p>
-          <button className="button button-primary" onClick={() => { setRsvpName(guest); setRsvpConfirmed(false); setFeedback(""); setRsvpOpen(true); }}>Confirm your attendance <ArrowRight size={16} /></button>
+          <p>I&apos;d love to celebrate this moment with you. Enter the name on your invitation to confirm your attendance.</p>
+          {returningGuests.length > 0 && <p className="returning-confirmation" role="status"><Check size={16} aria-hidden="true" /> You&apos;re confirmed, {returningGuests.join(", ")}.</p>}
+          <button className="button button-primary" onClick={openRSVP}>{returningGuests.length ? "View your confirmation" : "Confirm your attendance"} <ArrowRight size={16} /></button>
           <div className="rsvp-footnote">A little celebration. A lifetime of memories.</div>
         </div>
       </section>
@@ -235,25 +299,27 @@ export default function Home() {
       </footer>
 
       {rsvpOpen && <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setRsvpOpen(false); }}>
-        <div className="modal">
-          <button className="modal-close" onClick={() => setRsvpOpen(false)} aria-label="Close"><X /></button>
+        <div className="modal" ref={rsvpDialogRef} role="dialog" aria-modal="true" aria-labelledby="rsvp-title" aria-describedby="rsvp-desc">
+          <button className="modal-close" onClick={() => setRsvpOpen(false)} aria-label="Close attendance confirmation"><X /></button>
           <div className="section-kicker">THE NEXT CHAPTER <span>— RSVP</span></div>
-          <h2>{rsvpConfirmed ? "Thank you!" : "Confirm your attendance"}</h2>
-          <p className="modal-desc">{rsvpConfirmed ? "Your name is on the guest list. We look forward to celebrating with you." : "Enter the name shown on your invitation. You can enter one name or several names separated by commas or new lines."}</p>
-          {!rsvpConfirmed && <>
+          <h2 id="rsvp-title">{rsvpConfirmed ? "Thank you!" : "Confirm your attendance"}</h2>
+          <p className="modal-desc" id="rsvp-desc">{rsvpConfirmed ? `You're on the guest list${returningGuests.length ? `, ${returningGuests.join(", ")}` : ""}. We look forward to celebrating with you.` : "Enter the name shown on your invitation. You can enter one name or several names separated by commas or new lines."}</p>
+          {!rsvpConfirmed && <form onSubmit={event => { event.preventDefault(); void submitRSVP(); }}>
             <label className="field-label" htmlFor="rsvp-name">NAME ON YOUR INVITATION</label>
-            <input id="rsvp-name" className="field" value={rsvpName} onChange={e => setRsvpName(e.target.value)} onKeyDown={e => { if (e.key === "Enter") submitRSVP(); }} placeholder="Enter your name" autoComplete="name" />
-            <button className="button button-primary modal-submit" onClick={submitRSVP} disabled={submitting}>{submitting ? "Checking..." : "Confirm attendance"} <ArrowRight size={16} /></button>
-          </>}
-          {feedback && <p className="form-feedback">{feedback}</p>}
-          {rsvpConfirmed && <button className="button button-primary modal-submit" onClick={() => setRsvpOpen(false)}>Done <Check size={16} /></button>}
+            <input id="rsvp-name" className="field" value={rsvpName} onChange={e => setRsvpName(e.target.value)} placeholder="Enter your name" autoComplete="name" required />
+            <label className="field-label" htmlFor="rsvp-message">A SHORT MESSAGE <span>OPTIONAL</span></label>
+            <textarea id="rsvp-message" className="field textarea" value={rsvpMessage} onChange={e => setRsvpMessage(e.target.value)} maxLength={500} placeholder="Share a note for Lleyton..." rows={3} />
+            <button className="button button-primary modal-submit" type="submit" disabled={submitting}>{submitting ? "Checking..." : "Confirm attendance"} <ArrowRight size={16} /></button>
+          </form>}
+          {feedback && <p className="form-feedback" role="alert">{feedback}</p>}
+          {rsvpConfirmed && <button id="rsvp-done" className="button button-primary modal-submit" onClick={() => setRsvpOpen(false)}>Done <Check size={16} /></button>}
           {!rsvpConfirmed && <p className="privacy-note">Your name is checked against the invited guest list.</p>}
         </div>
       </div>}
 
       {terminalOpen && <div className="modal-backdrop terminal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setTerminalOpen(false); }}>
-        <div className="terminal-window">
-          <div className="terminal-bar"><div><i /><i /><i /></div><span>lleyton — guest terminal</span><button onClick={() => setTerminalOpen(false)}><X size={17} /></button></div>
+        <div className="terminal-window" role="dialog" aria-modal="true" aria-labelledby="terminal-title">
+          <div className="terminal-bar"><div><i /><i /><i /></div><span id="terminal-title">lleyton — guest terminal</span><button onClick={() => setTerminalOpen(false)} aria-label="Close guest terminal"><X size={17} /></button></div>
           <div className="terminal-body">
             {terminalLines.map((line, i) => <div className="terminal-line" key={i}>{line || "\u00a0"}</div>)}
             <form onSubmit={runCommand} className="terminal-input"><span>guest@lleyton:~$</span><input autoFocus value={command} onChange={e => setCommand(e.target.value)} aria-label="Terminal command" /></form>
@@ -262,10 +328,10 @@ export default function Home() {
       </div>}
 
       <div className="utility-dock">
-        <button onClick={copyInvitation} title="Copy invitation link"><Copy size={16} /></button>
-        <button onClick={downloadQR} title="Download QR code"><Code2 size={16} /></button>
+        <button onClick={copyInvitation} title="Copy invitation link" aria-label="Copy invitation link"><Copy size={16} /></button>
+        <button onClick={downloadQR} title="Download QR code" aria-label="Download invitation QR code"><Code2 size={16} /></button>
       </div>
-      {feedback && !rsvpOpen && <div className="toast">{feedback}</div>}
+      {feedback && !rsvpOpen && <div className="toast" role="status" aria-live="polite">{feedback}</div>}
     </main>
   );
 }
