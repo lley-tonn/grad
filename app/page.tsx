@@ -10,6 +10,9 @@ import {
 } from "lucide-react";
 import { graduation, journey } from "@/lib/config";
 
+type RSVPStatus = "attending" | "maybe" | "not_attending";
+const responseLabels: Record<RSVPStatus, string> = { attending: "Attending", maybe: "Undecided", not_attending: "Unable to attend" };
+
 function useCountdown(target: string) {
   const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
@@ -36,8 +39,10 @@ export default function Home() {
   const [rsvpOpen, setRsvpOpen] = useState(false);
   const [rsvpName, setRsvpName] = useState("");
   const [rsvpMessage, setRsvpMessage] = useState("");
+  const [rsvpStatus, setRsvpStatus] = useState<RSVPStatus>("attending");
   const [rsvpConfirmed, setRsvpConfirmed] = useState(false);
   const [returningGuests, setReturningGuests] = useState<string[]>([]);
+  const [returningStatus, setReturningStatus] = useState<RSVPStatus | null>(null);
   const rsvpDialogRef = useRef<HTMLDivElement>(null);
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState("");
@@ -60,8 +65,18 @@ export default function Home() {
     cleanUrl.searchParams.delete("id");
     setQrData(window.location.origin + cleanUrl.pathname);
     try {
-      const savedGuests = JSON.parse(localStorage.getItem("lleyton-graduation-confirmed") || "[]");
-      if (Array.isArray(savedGuests) && savedGuests.every(name => typeof name === "string")) setReturningGuests(savedGuests);
+      const savedResponse = JSON.parse(localStorage.getItem("lleyton-graduation-response") || "null");
+      const allowed = ["attending", "maybe", "not_attending"];
+      if (savedResponse && Array.isArray(savedResponse.guests) && savedResponse.guests.every((name: unknown) => typeof name === "string") && allowed.includes(savedResponse.status)) {
+        setReturningGuests(savedResponse.guests);
+        setReturningStatus(savedResponse.status);
+      } else {
+        const savedGuests = JSON.parse(localStorage.getItem("lleyton-graduation-confirmed") || "[]");
+        if (Array.isArray(savedGuests) && savedGuests.every(name => typeof name === "string") && savedGuests.length > 0) {
+          setReturningGuests(savedGuests);
+          setReturningStatus("attending");
+        }
+      }
     } catch { /* Local storage can be unavailable in private browsing. */ }
   }, []);
 
@@ -106,12 +121,17 @@ export default function Home() {
       const response = await fetch("/api/rsvp/check", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: rsvpName, message: rsvpMessage })
+        body: JSON.stringify({ name: rsvpName, message: rsvpMessage, status: rsvpStatus })
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Could not check the guest list.");
       setReturningGuests(result.guests);
-      try { localStorage.setItem("lleyton-graduation-confirmed", JSON.stringify(result.guests)); } catch { /* The response is still confirmed on the server. */ }
+      setReturningStatus(rsvpStatus);
+      try {
+        localStorage.setItem("lleyton-graduation-response", JSON.stringify({ guests: result.guests, status: rsvpStatus }));
+        if (rsvpStatus === "attending") localStorage.setItem("lleyton-graduation-confirmed", JSON.stringify(result.guests));
+        else localStorage.removeItem("lleyton-graduation-confirmed");
+      } catch { /* The response is still saved on the server. */ }
       setRsvpConfirmed(true);
       window.requestAnimationFrame(() => document.getElementById("rsvp-done")?.focus());
     } catch (error) {
@@ -124,7 +144,8 @@ export default function Home() {
   function openRSVP() {
     setRsvpName(guest || returningGuests.join(", "));
     setRsvpMessage("");
-    setRsvpConfirmed(returningGuests.length > 0);
+    setRsvpStatus(returningStatus || "attending");
+    setRsvpConfirmed(returningStatus !== null);
     setFeedback("");
     setRsvpOpen(true);
   }
@@ -287,8 +308,8 @@ export default function Home() {
           <div className="section-kicker">YOUR PRESENCE MATTERS <span>— 005</span></div>
           <h2>Save you<br /><em>a place?</em></h2>
           <p>I&apos;d love to celebrate this moment with you. Enter the name on your invitation to confirm your attendance.</p>
-          {returningGuests.length > 0 && <p className="returning-confirmation" role="status"><Check size={16} aria-hidden="true" /> You&apos;re confirmed, {returningGuests.join(", ")}.</p>}
-          <button className="button button-primary" onClick={openRSVP}>{returningGuests.length ? "View your confirmation" : "Confirm your attendance"} <ArrowRight size={16} /></button>
+          {returningStatus && <p className="returning-confirmation" role="status"><Check size={16} aria-hidden="true" /> {returningStatus === "attending" ? `You're confirmed, ${returningGuests.join(", ")}.` : `Your response is recorded as ${responseLabels[returningStatus].toLowerCase()}.`}</p>}
+          <button className="button button-primary" onClick={openRSVP}>{returningStatus ? "View your response" : "Confirm your attendance"} <ArrowRight size={16} /></button>
           <div className="rsvp-footnote">A little celebration. A lifetime of memories.</div>
         </div>
       </section>
@@ -302,18 +323,27 @@ export default function Home() {
         <div className="modal" ref={rsvpDialogRef} role="dialog" aria-modal="true" aria-labelledby="rsvp-title" aria-describedby="rsvp-desc">
           <button className="modal-close" onClick={() => setRsvpOpen(false)} aria-label="Close attendance confirmation"><X /></button>
           <div className="section-kicker">THE NEXT CHAPTER <span>— RSVP</span></div>
-          <h2 id="rsvp-title">{rsvpConfirmed ? "Thank you!" : "Confirm your attendance"}</h2>
-          <p className="modal-desc" id="rsvp-desc">{rsvpConfirmed ? `You're on the guest list${returningGuests.length ? `, ${returningGuests.join(", ")}` : ""}. We look forward to celebrating with you.` : "Enter the name shown on your invitation. You can enter one name or several names separated by commas or new lines."}</p>
+          <h2 id="rsvp-title">{rsvpConfirmed ? (returningStatus === "attending" ? "You're confirmed" : "Thank you for replying") : "Confirm your attendance"}</h2>
+          <p className="modal-desc" id="rsvp-desc">{rsvpConfirmed ? returningStatus === "attending" ? `You're on the guest list${returningGuests.length ? `, ${returningGuests.join(", ")}` : ""}. We look forward to celebrating with you.` : `Your response is recorded as ${responseLabels[returningStatus || "maybe"].toLowerCase()}. Thank you for letting us know.` : "Enter the name shown on your invitation. You can enter one name or several names separated by commas or new lines."}</p>
           {!rsvpConfirmed && <form onSubmit={event => { event.preventDefault(); void submitRSVP(); }}>
             <label className="field-label" htmlFor="rsvp-name">NAME ON YOUR INVITATION</label>
             <input id="rsvp-name" className="field" value={rsvpName} onChange={e => setRsvpName(e.target.value)} placeholder="Enter your name" autoComplete="name" required />
+            <span className="field-label" id="attendance-choice-label">YOUR RESPONSE</span>
+            <div className="choice-row" role="group" aria-labelledby="attendance-choice-label">
+              <button type="button" className={rsvpStatus === "attending" ? "choice active" : "choice"} aria-pressed={rsvpStatus === "attending"} onClick={() => setRsvpStatus("attending")}><Check size={15} aria-hidden="true" /> I&apos;ll be there</button>
+              <button type="button" className={rsvpStatus === "maybe" ? "choice active" : "choice"} aria-pressed={rsvpStatus === "maybe"} onClick={() => setRsvpStatus("maybe")}>Not sure yet</button>
+              <button type="button" className={rsvpStatus === "not_attending" ? "choice active" : "choice"} aria-pressed={rsvpStatus === "not_attending"} onClick={() => setRsvpStatus("not_attending")}>Can&apos;t make it</button>
+            </div>
             <label className="field-label" htmlFor="rsvp-message">A SHORT MESSAGE <span>OPTIONAL</span></label>
             <textarea id="rsvp-message" className="field textarea" value={rsvpMessage} onChange={e => setRsvpMessage(e.target.value)} maxLength={500} placeholder="Share a note for Lleyton..." rows={3} />
-            <button className="button button-primary modal-submit" type="submit" disabled={submitting}>{submitting ? "Checking..." : "Confirm attendance"} <ArrowRight size={16} /></button>
+            <button className="button button-primary modal-submit" type="submit" disabled={submitting}>{submitting ? "Sending..." : "Send response"} <ArrowRight size={16} /></button>
           </form>}
           {feedback && <p className="form-feedback" role="alert">{feedback}</p>}
-          {rsvpConfirmed && <button id="rsvp-done" className="button button-primary modal-submit" onClick={() => setRsvpOpen(false)}>Done <Check size={16} /></button>}
-          {!rsvpConfirmed && <p className="privacy-note">Your name is checked against the invited guest list.</p>}
+          {rsvpConfirmed && <>
+            <button id="rsvp-done" className="button button-primary modal-submit" onClick={() => setRsvpOpen(false)}>Done <Check size={16} /></button>
+            <button className="response-edit-link" onClick={() => { setRsvpConfirmed(false); window.requestAnimationFrame(() => document.getElementById("rsvp-name")?.focus()); }}>Change my response</button>
+          </>}
+          {!rsvpConfirmed && <p className="privacy-note">Your name is checked against the invited guest list and your response is saved securely.</p>}
         </div>
       </div>}
 

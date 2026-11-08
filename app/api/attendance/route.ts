@@ -19,14 +19,14 @@ export async function GET(request: NextRequest) {
   const supabase = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } });
   const [{ data: guests, error: guestError }, { data: attendance, error: attendanceError }] = await Promise.all([
     supabase.from("graduation_guests").select("id,full_name").order("full_name"),
-    supabase.from("graduation_attendance").select("guest_id,status,guest_message,confirmed_at")
+    supabase.from("graduation_attendance").select("guest_id,status,guest_message,confirmed_at,updated_at")
   ]);
   if (guestError || attendanceError) return NextResponse.json({ error: "We couldn't load the attendance list." }, { status: 500 });
 
   const attendanceById = new Map((attendance ?? []).map(row => [row.guest_id, row]));
   return NextResponse.json({ guests: (guests ?? []).map(guest => {
     const response = attendanceById.get(guest.id);
-    return { id: guest.id, name: guest.full_name, status: response?.status ?? "pending", message: response?.guest_message ?? "", confirmedAt: response?.confirmed_at ?? null };
+    return { id: guest.id, name: guest.full_name, status: response?.status ?? "pending", message: response?.guest_message ?? "", respondedAt: response && response.status !== "pending" ? (response.updated_at ?? response.confirmed_at) : null };
   }) });
 }
 

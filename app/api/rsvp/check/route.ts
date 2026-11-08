@@ -8,6 +8,10 @@ export async function POST(request: Request) {
     if (typeof body.name !== "string" || !body.name.trim() || body.name.length > 500 || (body.message !== undefined && (typeof body.message !== "string" || body.message.length > 500))) {
       return NextResponse.json({ error: "Please enter the name on your invitation." }, { status: 400 });
     }
+    const allowedStatuses = ["attending", "maybe", "not_attending"];
+    if (!allowedStatuses.includes(body.status)) {
+      return NextResponse.json({ error: "Please choose an attendance response." }, { status: 400 });
+    }
 
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const serviceKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -24,13 +28,13 @@ export async function POST(request: Request) {
     }
 
     const idsByName = new Map((guests ?? []).map(guest => [guest.full_name, guest.id]));
-    const confirmedAt = new Date().toISOString();
+    const respondedAt = new Date().toISOString();
     const { error } = await supabase.from("graduation_attendance").upsert(
-      matchedNames.map(fullName => ({ guest_id: idsByName.get(fullName), status: "attending", confirmed_at: confirmedAt, updated_at: confirmedAt, guest_message: body.message?.trim() || null })),
+      matchedNames.map(fullName => ({ guest_id: idsByName.get(fullName), status: body.status, confirmed_at: body.status === "attending" ? respondedAt : null, updated_at: respondedAt, guest_message: body.message?.trim() || null })),
       { onConflict: "guest_id" }
     );
     if (error) throw error;
-    return NextResponse.json({ success: true, guests: matchedNames });
+    return NextResponse.json({ success: true, guests: matchedNames, status: body.status });
   } catch {
     return NextResponse.json({ error: "We couldn't check the guest list. Please try again." }, { status: 400 });
   }
