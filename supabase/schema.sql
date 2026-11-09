@@ -50,7 +50,10 @@ insert into public.graduation_guests (full_name, normalized_name) values
   ('Thiwe Patricia', 'thiwe patricia'),
   ('Walter Pimego', 'walter pimego'),
   ('Piracel Peace Pimego', 'piracel peace pimego'),
-  ('Pimego Edward', 'pimego edward')
+  ('Pimego Edward', 'pimego edward'),
+  ('Ufoyrwoth Keith', 'ufoyrwoth keith'),
+  ('Nassanga Cindy Akello', 'nassanga cindy akello'),
+  ('Edmond Okumu', 'edmond okumu')
 on conflict (normalized_name) do update set full_name = excluded.full_name;
 
 insert into public.graduation_attendance (guest_id, status)

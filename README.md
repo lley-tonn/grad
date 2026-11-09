@@ -36,7 +36,7 @@ Guests confirm by entering a name from the Supabase `graduation_guests` roster. 
 
 ## 5. Connect RSVP storage
 1. Create a Supabase project.
-2. For a new project, open the SQL Editor and run `supabase/schema.sql`. For an existing project, run `supabase/migrations/202611080001_guest_roster_and_attendance.sql` followed by `supabase/migrations/202611080002_guest_messages_and_host_controls.sql`. The migrations seed the 11 invited names, preserve matching prior RSVP responses, and add private guest messages and host-managed response states.
+2. For a new project, open the SQL Editor and run `supabase/schema.sql`. For an existing project, apply the migrations in order: `202611080001_guest_roster_and_attendance.sql`, `202611080002_guest_messages_and_host_controls.sql`, then `202611090001_add_three_invited_guests.sql`. They seed the invitees, preserve matching prior RSVP responses, and add attendance controls and guest messages.
 3. Copy the project URL and anon key into `.env.local`:
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
